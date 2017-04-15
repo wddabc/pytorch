@@ -29,7 +29,8 @@ def is_available():
     try:
         return torch._C._cuda_getDeviceCount() > 0
     except RuntimeError:
-            return False
+        return False
+
 
 def _sleep(cycles):
     torch._C._cuda_sleep(cycles)
@@ -44,8 +45,8 @@ def _load_cudart():
     raise RuntimeError(
         "couldn't find libcudart. Make sure CUDA libraries are installed in a"
         "default location, or that they're in {}."
-        .format('DYLD_LIBRARY_PATH' if platform.system() == 'Darwin' else
-                'LD_LIBRARY_PATH'))
+            .format('DYLD_LIBRARY_PATH' if platform.system() == 'Darwin' else
+                    'LD_LIBRARY_PATH'))
 
 
 def _check_driver():
@@ -247,6 +248,7 @@ def _dummy_type(name):
         class_name = self.__class__.__name__
         raise RuntimeError(
             "Tried to instantiate dummy base class {}".format(class_name))
+
     return type(storage_name, (object,), {"__init__": init_err})
 
 
@@ -310,7 +312,6 @@ class HalfStorage(_CudaBase, torch._C.CudaHalfStorageBase, _StorageBase):
 
 
 class DoubleTensor(_CudaBase, torch._C.CudaDoubleTensorBase, _TensorBase):
-
     def is_signed(self):
         return True
 
@@ -320,7 +321,6 @@ class DoubleTensor(_CudaBase, torch._C.CudaDoubleTensorBase, _TensorBase):
 
 
 class FloatTensor(_CudaBase, torch._C.CudaFloatTensorBase, _TensorBase):
-
     def is_signed(self):
         return True
 
@@ -330,7 +330,6 @@ class FloatTensor(_CudaBase, torch._C.CudaFloatTensorBase, _TensorBase):
 
 
 class LongTensor(_CudaBase, torch._C.CudaLongTensorBase, _TensorBase):
-
     def is_signed(self):
         return True
 
@@ -340,7 +339,6 @@ class LongTensor(_CudaBase, torch._C.CudaLongTensorBase, _TensorBase):
 
 
 class IntTensor(_CudaBase, torch._C.CudaIntTensorBase, _TensorBase):
-
     def is_signed(self):
         return True
 
@@ -350,7 +348,6 @@ class IntTensor(_CudaBase, torch._C.CudaIntTensorBase, _TensorBase):
 
 
 class ShortTensor(_CudaBase, torch._C.CudaShortTensorBase, _TensorBase):
-
     def is_signed(self):
         return True
 
@@ -360,7 +357,6 @@ class ShortTensor(_CudaBase, torch._C.CudaShortTensorBase, _TensorBase):
 
 
 class CharTensor(_CudaBase, torch._C.CudaCharTensorBase, _TensorBase):
-
     def is_signed(self):
         # TODO
         return False
@@ -371,7 +367,6 @@ class CharTensor(_CudaBase, torch._C.CudaCharTensorBase, _TensorBase):
 
 
 class ByteTensor(_CudaBase, torch._C.CudaByteTensorBase, _TensorBase):
-
     def is_signed(self):
         return False
 
@@ -381,7 +376,6 @@ class ByteTensor(_CudaBase, torch._C.CudaByteTensorBase, _TensorBase):
 
 
 class HalfTensor(_CudaBase, torch._C.CudaHalfTensorBase, _TensorBase):
-
     def is_signed(self):
         return True
 

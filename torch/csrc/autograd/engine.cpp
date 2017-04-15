@@ -354,7 +354,7 @@ auto Engine::start_threads() -> void {
   cudaError_t err = cudaGetDeviceCount(&num_devices);
 
   // check for case of compiled with CUDA but no NVIDIA driver available
-  if (err == cudaErrorInsufficientDriver) {
+  if (err != cudaSuccess) {
     num_devices = 0;
   } else {
     THCudaCheck(err);

@@ -136,7 +136,7 @@ PyObject * THCPModule_isDriverSufficient(PyObject *self)
 {
   int count;
   cudaError_t err = cudaGetDeviceCount(&count);
-  if (err == cudaErrorInsufficientDriver) {
+  if (err != cudaSuccess) {
     return PyBool_FromLong(0);
   }
   return PyBool_FromLong(1);

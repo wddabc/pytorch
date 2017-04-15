@@ -28,11 +28,8 @@ def is_available():
         return False
     try:
         return torch._C._cuda_getDeviceCount() > 0
-    except RuntimeError as e:
-        if 'no CUDA-capable device is detected' in e.args[0]:
+    except RuntimeError:
             return False
-        raise
-
 
 def _sleep(cycles):
     torch._C._cuda_sleep(cycles)

@@ -41,16 +41,21 @@ int THNN_(minIndexType)(THCState *state, int count, ...)
   va_list list;
   va_start(list, count);
 
-  int maxDim = -2;
-  for (int arg=0; arg < count; ++arg){
-    THCTensor* tens = va_arg(list, THCTensor*);
-    if(THCTensor_(isContiguous)(state, tens)) continue;
-    int tensdims = TensorUtils<THCTensor>::getDims(state, tens);
-    maxDim = (( tensdims> maxDim) ? tensdims : maxDim);
-  }
+  THCTensor* tens = va_arg(list, THCTensor*);
+  int startDim = TensorUtils<THCTensor>::getDims(state, tens);
+  bool canCollapse = THCTensor_(isContiguous)(state,tens);
 
+  for (int arg=1; arg < count; ++arg){
+    tens = va_arg(list, THCTensor*);
+    canCollapse = canCollapse && THCTensor_(isContiguous)(state, tens);
+    if(TensorUtils<THCTensor>::getDims(state, tens) != startDim){
+      va_end(list);
+      return -1;
+    }
+  }
   va_end(list);
-  return maxDim;
+  if(canCollapse) return -2;
+  return startDim;
 }
 
 bool THNN_(canUse32BitIndexMath)(THCState *state, int count, ...)
@@ -439,66 +444,8 @@ __global__ void
   }
 }
 
-// *********** START Generate specializations *************** //
-#define EXPAND_FUNCTION(ITYPE, DIM)                                     \
-  template __global__ void THNN_(GRUForward)<DATATYPE, ITYPE, DIM>      \
-    (TensorInfo<DATATYPE, ITYPE> inputI,                                \
-     TensorInfo<DATATYPE, ITYPE> hiddenI,                               \
-     TensorInfo<DATATYPE, ITYPE> bias1I,                                \
-     TensorInfo<DATATYPE, ITYPE> bias2I,                                \
-     TensorInfo<DATATYPE, ITYPE> hxI,                                   \
-     TensorInfo<DATATYPE, ITYPE> hyI,                                   \
-     ITYPE hsz,                                                         \
-     ITYPE totalElements);                                              \
-                                                                        \
-  template void __global__ THNN_(GRUBackward)<DATATYPE, ITYPE, DIM>     \
-    (TensorInfo<DATATYPE, ITYPE> inputI,                                \
-     TensorInfo<DATATYPE, ITYPE> hiddenI,                               \
-     TensorInfo<DATATYPE, ITYPE> gradoutputI,                           \
-     TensorInfo<DATATYPE, ITYPE> gradinputI,                            \
-     ITYPE hsz,                                                         \
-     ITYPE totalElements);                                              \
-                                                                        \
-  template void __global__ THNN_(LSTMForward)<DATATYPE, ITYPE, DIM>     \
-    (TensorInfo<DATATYPE, ITYPE> inputI,                                \
-     TensorInfo<DATATYPE, ITYPE> hiddenI,                               \
-     TensorInfo<DATATYPE, ITYPE> bias1I,                                \
-     TensorInfo<DATATYPE, ITYPE> bias2I,                                \
-     TensorInfo<DATATYPE, ITYPE> cxI,                                   \
-     TensorInfo<DATATYPE, ITYPE> hyI,                                   \
-     TensorInfo<DATATYPE, ITYPE> cyI,                                   \
-     ITYPE hsz,                                                         \
-     ITYPE totalElements);                                              \
-                                                                        \
-  template void __global__ THNN_(LSTMBackward)<DATATYPE, ITYPE, DIM>    \
-    (TensorInfo<DATATYPE, ITYPE> inputI,                                \
-     TensorInfo<DATATYPE, ITYPE> hiddenI,                               \
-     TensorInfo<DATATYPE, ITYPE> cxI,                                   \
-     TensorInfo<DATATYPE, ITYPE> cyI,                                   \
-     TensorInfo<DATATYPE, ITYPE> gradoutputI,                           \
-     TensorInfo<DATATYPE, ITYPE> gradoutputcellI,                       \
-     TensorInfo<DATATYPE, ITYPE> gradinputI,                            \
-     ITYPE hsz,                                                         \
-     ITYPE totalElements);                                              \
 
-
-#define EXPAND_DIM(ITYPE)                            \
-  EXPAND_FUNCTION(ITYPE, -2)                         \
-  EXPAND_FUNCTION(ITYPE, -1)                         \
-  EXPAND_FUNCTION(ITYPE, 1)                          \
-  EXPAND_FUNCTION(ITYPE, 2)                          \
-
-
-#define EXPAND_TYPE                        \
-  EXPAND_DIM(unsigned int)                 \
-  EXPAND_DIM(unsigned long)                \
-
-
-EXPAND_TYPE
-
-// ************ END generating specializations ************** //
-
-// ************ START Create actual function calls ********** //
+// ************ START Create function calls ********** //
 #define FILL_FUNCTION(ITYPE, DIM, FUNCTION) FUNCTION(ITYPE, DIM)
 
 #define FILL_DIM(ITYPE, DIM, FUNCTION)          \
@@ -592,11 +539,13 @@ void THNN_(LSTM_forw_ind_wrap)(
                  "Bias in pointwise operation is an incorrect size, must be 4 x feature size.");
   }
 
-  inputI.collapseDims();
-  hiddenI.collapseDims();
-  cxI.collapseDims();
-  hyI.collapseDims();
-  cyI.collapseDims();
+  if(maxDim == -2){
+    inputI.collapseDims();
+    hiddenI.collapseDims();
+    cxI.collapseDims();
+    hyI.collapseDims();
+    cyI.collapseDims();
+  }
 
   INDTYPE zero[1] = {0};
   TensorInfo<DATATYPE, INDTYPE> nullinfo =
@@ -607,8 +556,10 @@ void THNN_(LSTM_forw_ind_wrap)(
   if(has_bias){
     bias1I = getTensorInfo<THCTensor, INDTYPE>(state, bias1);
     bias2I = getTensorInfo<THCTensor, INDTYPE>(state, bias2);
-    bias1I.collapseDims();
-    bias2I.collapseDims();
+    if(maxDim == -2){
+      bias1I.collapseDims();
+      bias2I.collapseDims();
+    }
   }
 
   FILL_DIM(INDTYPE, maxDim, LSTM_FORWARD);
@@ -686,14 +637,15 @@ void THNN_(LSTM_back_ind_wrap)(
 
   INDTYPE hid_size = gradoutI.sizes[gradoutI.dims-1];
 
-  inputI.collapseDims();
-  hiddenI.collapseDims();
-  cxI.collapseDims();
-  cyI.collapseDims();
-  gradoutI.collapseDims();
-  gradoutcI.collapseDims();
-  gradinI.collapseDims();
-
+  if(maxDim == -2){
+    inputI.collapseDims();
+    hiddenI.collapseDims();
+    cxI.collapseDims();
+    cyI.collapseDims();
+    gradoutI.collapseDims();
+    gradoutcI.collapseDims();
+    gradinI.collapseDims();
+  }
   FILL_DIM(INDTYPE, maxDim, LSTM_BACKWARD);
 
 }
@@ -779,11 +731,12 @@ void THNN_(GRU_forw_ind_wrap)(
                  "Bias in pointwise operation is an incorrect size, must be 3 x feature size.");
   }
 
-  inputI.collapseDims();
-  hiddenI.collapseDims();
-  hyI.collapseDims();
-  hxI.collapseDims();
-
+  if(maxDim == -2){
+    inputI.collapseDims();
+    hiddenI.collapseDims();
+    hyI.collapseDims();
+    hxI.collapseDims();
+  }
   INDTYPE zero[1] = {0};
   TensorInfo<DATATYPE, INDTYPE> nullinfo =
     TensorInfo<DATATYPE, INDTYPE>(NULL, 1, zero, zero);
@@ -793,8 +746,10 @@ void THNN_(GRU_forw_ind_wrap)(
   if(has_bias){
     bias1I = getTensorInfo<THCTensor, INDTYPE>(state, bias1);
     bias2I = getTensorInfo<THCTensor, INDTYPE>(state, bias2);
-    bias1I.collapseDims();
-    bias2I.collapseDims();
+    if(maxDim == -2){
+      bias1I.collapseDims();
+      bias2I.collapseDims();
+    }
   }
 
   FILL_DIM(INDTYPE, maxDim, GRU_FORWARD);
@@ -862,11 +817,12 @@ void THNN_(GRU_back_ind_wrap)(
 
   INDTYPE hid_size = gradoutI.sizes[gradoutI.dims-1];
 
-  inputI.collapseDims();
-  hiddenI.collapseDims();
-  gradoutI.collapseDims();
-  gradinI.collapseDims();
-
+  if(maxDim == -2){
+    inputI.collapseDims();
+    hiddenI.collapseDims();
+    gradoutI.collapseDims();
+    gradinI.collapseDims();
+  }
   FILL_DIM(INDTYPE, maxDim, GRU_BACKWARD);
 }
 

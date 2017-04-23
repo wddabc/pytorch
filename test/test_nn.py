@@ -756,6 +756,63 @@ class TestNN(NNTestCase):
         input = torch.Tensor(num_features, b, d, w, h)
         self._test_dropout(nn.Dropout3d, input)
 
+    def _test_InstanceNorm(self, cls, input):
+        b, c = input.size(0), input.size(1)
+        input_var = Variable(input)
+
+        IN = cls(c, eps=0)
+
+        output = IN(input_var)
+        out_reshaped = output.transpose(1, 0).contiguous().view(c, -1)
+
+        mean = out_reshaped.mean(1)
+        var = out_reshaped.var(1, unbiased=False)
+
+        self.assertAlmostEqual(torch.abs(mean.data).mean(), 0, delta=1e-5)
+        self.assertAlmostEqual(torch.abs(var.data).mean(), 1, delta=1e-5)
+
+        # If momentum==1 running_mean/var should be
+        # equal to mean/var of the input
+        IN = cls(c, momentum=1, eps=0)
+
+        output = IN(input_var)
+
+        input_reshaped = input_var.transpose(1, 0).contiguous().view(c, -1)
+        mean = input_reshaped.mean(1)
+
+        input_reshaped = input_var.transpose(1, 0).contiguous().view(c, b, -1)
+        var = input_reshaped.var(2, unbiased=True)[:, :]
+
+        self.assertAlmostEqual(torch.abs(mean.data - IN.running_mean).mean(), 0, delta=1e-5)
+        self.assertAlmostEqual(torch.abs(var.data.mean(1) - IN.running_var).mean(), 0, delta=1e-5)
+
+    def test_InstanceNorm2d(self):
+        b = random.randint(3, 5)
+        c = random.randint(1, 5)
+        w = random.randint(2, 5)
+        h = random.randint(2, 5)
+
+        input = torch.Tensor(b, c, h, w).uniform_()
+        self._test_InstanceNorm(nn.InstanceNorm2d, input)
+
+    def test_InstanceNorm1d(self):
+        b = random.randint(3, 5)
+        c = random.randint(1, 5)
+        d = random.randint(2, 5)
+
+        input = torch.Tensor(b, c, d).uniform_()
+        self._test_InstanceNorm(nn.InstanceNorm1d, input)
+
+    def test_InstanceNorm3d(self):
+        b = random.randint(3, 5)
+        c = random.randint(1, 5)
+        w = random.randint(2, 5)
+        h = random.randint(2, 5)
+        d = random.randint(2, 5)
+
+        input = torch.Tensor(b, c, h, w, d).uniform_()
+        self._test_InstanceNorm(nn.InstanceNorm3d, input)
+
     def test_pad(self):
         inputs = Variable(torch.randn(1, 3, 4, 4), requires_grad=True)
         self.assertTrue(gradcheck(lambda x: F.pad(x, (1, 1, 1, 1)), (inputs,)))
@@ -1306,6 +1363,33 @@ class TestNN(NNTestCase):
                          torch.cat([i1.grad.data, i2.grad.data], 1))
         self.assertEqual(m.bias.grad.data,
                          torch.cat([m1.bias.grad.data, m2.bias.grad.data], 0))
+        self.assertEqual(m.weight.grad.data,
+                         torch.cat([m1.weight.grad.data, m2.weight.grad.data], 0))
+
+    # For https://github.com/pytorch/pytorch/pull/1273
+    # Almost identical to the above `test_Conv2d_naive_groups`
+    def test_Conv2d_groups_nobias(self):
+        m = nn.Conv2d(4, 4, kernel_size=3, groups=2, bias=False)
+        i = Variable(torch.randn(2, 4, 6, 6), requires_grad=True)
+        output = m(i)
+        grad_output = torch.randn(2, 4, 4, 4)
+        output.backward(grad_output)
+
+        m1 = nn.Conv2d(2, 2, kernel_size=3, bias=False)
+        m1.weight.data.copy_(m.weight.data[:2])
+        i1 = Variable(i.data[:, :2].contiguous(), requires_grad=True)
+        output1 = m1(i1)
+        output1.backward(grad_output[:, :2].contiguous())
+
+        m2 = nn.Conv2d(2, 2, kernel_size=3, bias=False)
+        m2.weight.data.copy_(m.weight.data[2:])
+        i2 = Variable(i.data[:, 2:].contiguous(), requires_grad=True)
+        output2 = m2(i2)
+        output2.backward(grad_output[:, 2:].contiguous())
+
+        self.assertEqual(output, torch.cat([output1, output2], 1))
+        self.assertEqual(i.grad.data,
+                         torch.cat([i1.grad.data, i2.grad.data], 1))
         self.assertEqual(m.weight.grad.data,
                          torch.cat([m1.weight.grad.data, m2.weight.grad.data], 0))
 
@@ -2367,6 +2451,13 @@ new_module_tests = [
         desc='no_bias'
     ),
     dict(
+        module_name='ConvTranspose1d',
+        constructor_args=(3, 4, 3, 2, 1, 1, 1, True, 2),
+        input_size=(1, 3, 6),
+        cudnn=True,
+        desc='dilated'
+    ),
+    dict(
         module_name='MaxPool1d',
         constructor_args=(4,),
         input_size=(2, 10, 4)
@@ -2427,6 +2518,13 @@ new_module_tests = [
         constructor_args=(3, 4, 3, (3, 2), 1, (1, 1)),
         cudnn=True,
         input_size=(1, 3, 7, 6)
+    ),
+    dict(
+        module_name='ConvTranspose2d',
+        constructor_args=(3, 4, 3, (2, 3), 1, (1, 1), 1, False, (2, 2)),
+        input_size=(1, 3, 6, 7),
+        cudnn=True,
+        desc='dilated'
     ),
     dict(
         module_name='ConvTranspose2d',
@@ -2546,6 +2644,13 @@ new_module_tests = [
         input_size=(1, 2, 4, 5, 4)
     ),
     dict(
+        module_name='ConvTranspose3d',
+        constructor_args=(2, 3, (2, 3, 2), 1, 0, 0, 1, True, (2, 2, 2)),
+        cudnn=True,
+        input_size=(1, 2, 4, 5, 4),
+        desc='dilated'
+    ),
+    dict(
         module_name='MaxPool3d',
         constructor_args=((2, 2, 2),),
         input_size=(2, 3, 5, 5, 5)
@@ -2588,8 +2693,7 @@ new_module_tests = [
         constructor=lambda: nn.Embedding(4, 3, sparse=True),
         input=Variable(torch.randperm(2).repeat(1, 2)),
         jacobian_input=False,
-        fullname='Embedding_sparse',
-        test_cuda=False,
+        fullname='Embedding_sparse'
     ),
     dict(
         constructor=lambda: nn.FractionalMaxPool2d(
